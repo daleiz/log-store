@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: e7646a4d3760344dbd38d946522e237b2582ca9f46e8bbcd94a2d512a12a1159
+-- hash: 720e8cff4600c424acd4302a8ffe4037f6503c31e390021ccdb743033ea1e65a
 
 name:           log-store
 version:        0.1.0.0
@@ -80,6 +80,7 @@ test-suite log-store-test
     , streamly
     , temporary-resourcet
     , text
+    , time
     , transformers
     , utf8-string
     , vector

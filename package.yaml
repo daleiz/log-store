@@ -57,6 +57,7 @@ tests:
     - hspec-expectations
     - QuickCheck
     - temporary-resourcet
+    - time
 
 benchmarks:
   log-store-benchmark:
