@@ -88,7 +88,7 @@ initialize Config {..} =
             { name = dataCFName,
               options =
                 R.defaultDBOptions
-                  { R.writeBufferSize = 64 * 1024 * 1024,
+                  { R.writeBufferSize = 1024 * 1024 * 1024,
                     R.disableAutoCompactions = True,
                     R.level0FileNumCompactionTrigger = 2 ^ 29,
                     R.level0SlowdownWritesTrigger = 2 ^ 29,
