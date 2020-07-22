@@ -42,7 +42,7 @@ main = hspec $
   describe "Basic Functionality" $
     do
       it "append forever for bench" $
-        withLogStore Config {rootDbPath = "db-temp"}
+        withLogStore Config {rootDbPath = "/tmp/db-temp"}
           ( do
               openAndAppendForever 
               return "success"
