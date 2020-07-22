@@ -71,7 +71,9 @@ initialize Config {..} =
       R.openColumnFamilies
         R.defaultDBOptions
           { R.createIfMissing = True,
-            R.createMissingColumnFamilies = True
+            R.createMissingColumnFamilies = True,
+            R.enableStatistics = True,
+            R.statsDumpPeriodSec = 10
           }
         rootDbPath
         [ R.ColumnFamilyDescriptor
