@@ -88,7 +88,7 @@ main = do
       withLogStore
         Config
           { rootDbPath = dbPath,
-            dataCfWriteBufferSize = 1024 * 1024 * 1024,
+            dataCfWriteBufferSize = 200 * 1024 * 1024,
             dbWriteBufferSize = 0,
             enableDBStatistics = True,
             dbStatsDumpPeriodSec = 2
@@ -98,7 +98,7 @@ main = do
       withLogStore
         Config
           { rootDbPath = dbPath,
-            dataCfWriteBufferSize = 1024 * 1024 * 1024,
+            dataCfWriteBufferSize = 200 * 1024 * 1024,
             dbWriteBufferSize = 0,
             enableDBStatistics = True,
             dbStatsDumpPeriodSec = 30
@@ -253,7 +253,7 @@ printAppendSpeed dict entrySize = do
   return ()
   where
     printSpeed num = do
-      threadDelay 5000000
+      threadDelay 3000000
       curNum <- increaseBy dict appendedEntryNumKey 0
       print $ fromInteger ((curNum - num) * toInteger entrySize) / 1024 / 1024 / 5
       printSpeed curNum
@@ -265,7 +265,7 @@ printAppendAndReadSpeed dict entrySize = do
   return ()
   where
     printSpeed prevAppendedNum prevReadNum = do
-      threadDelay 5000000
+      threadDelay 3000000
       curAppendedNum <- increaseBy dict appendedEntryNumKey 0
       curReadNum <- increaseBy dict readEntryNumKey 0
       putStrLn $
