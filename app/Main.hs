@@ -255,7 +255,7 @@ printAppendSpeed dict entrySize = do
     printSpeed num = do
       threadDelay 3000000
       curNum <- increaseBy dict appendedEntryNumKey 0
-      print $ fromInteger ((curNum - num) * toInteger entrySize) / 1024 / 1024 / 5
+      print $ fromInteger ((curNum - num) * toInteger entrySize) / 1024 / 1024 / 3
       printSpeed curNum
 
 printAppendAndReadSpeed :: H.HashMap B.ByteString (IORef Integer) -> Int -> IO ()
@@ -270,9 +270,9 @@ printAppendAndReadSpeed dict entrySize = do
       curReadNum <- increaseBy dict readEntryNumKey 0
       putStrLn $
         "append: "
-          ++ show (fromInteger ((curAppendedNum - prevAppendedNum) * toInteger entrySize) / 1024 / 1024 / 5)
+          ++ show (fromInteger ((curAppendedNum - prevAppendedNum) * toInteger entrySize) / 1024 / 1024 / 3)
           ++ " MB/s, "
           ++ "read: "
-          ++ show (fromInteger ((curReadNum - prevReadNum) * toInteger entrySize) / 1024 / 1024 / 5)
+          ++ show (fromInteger ((curReadNum - prevReadNum) * toInteger entrySize) / 1024 / 1024 / 3)
           ++ " MB/s"
       printSpeed curAppendedNum curReadNum
