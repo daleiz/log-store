@@ -7,7 +7,7 @@ module Main where
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async.Lifted (async, mapConcurrently_, wait)
 import Control.Exception (throwIO)
-import Control.Monad (forever, when)
+import Control.Monad (forever)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Reader (ReaderT)
 import Data.Atomics (atomicModifyIORefCAS)
@@ -123,7 +123,7 @@ main = do
           }
         ( do
             appendResult <- async (mapConcurrently_ (appendTask dict writeTotalSize writeEntrySize writeBatchSize . T.append logNamePrefix . T.pack . show) [1 .. logNum])
-            liftIO $ threadDelay 1000000
+            liftIO $ threadDelay 10000000
             readResult <- async (mapConcurrently_ (readTask dict readBatchSize . T.append logNamePrefix . T.pack . show) [1 .. logNum])
             wait appendResult
             wait readResult
@@ -249,32 +249,30 @@ periodRun initDelay interval action = do
 printAppendSpeed :: H.HashMap B.ByteString (IORef Integer) -> Int -> IO ()
 printAppendSpeed dict entrySize = do
   forkIO $ do
-    threadDelay 1000000
     printSpeed 0
   return ()
   where
     printSpeed num = do
-      threadDelay 1000000
+      threadDelay 5000000
       curNum <- increaseBy dict appendedEntryNumKey 0
-      print $ fromInteger ((curNum - num) * toInteger entrySize) / 1024 / 1024
+      print $ fromInteger ((curNum - num) * toInteger entrySize) / 1024 / 1024 / 5
       printSpeed curNum
 
 printAppendAndReadSpeed :: H.HashMap B.ByteString (IORef Integer) -> Int -> IO ()
 printAppendAndReadSpeed dict entrySize = do
   forkIO $ do
-    threadDelay 1000000
     printSpeed 0 0
   return ()
   where
     printSpeed prevAppendedNum prevReadNum = do
-      threadDelay 1000000
+      threadDelay 5000000
       curAppendedNum <- increaseBy dict appendedEntryNumKey 0
       curReadNum <- increaseBy dict readEntryNumKey 0
       putStrLn $
         "append: "
-          ++ show (fromInteger ((curAppendedNum - prevAppendedNum) * toInteger entrySize) / 1024 / 1024)
+          ++ show (fromInteger ((curAppendedNum - prevAppendedNum) * toInteger entrySize) / 1024 / 1024 / 5)
           ++ " MB/s, "
           ++ "read: "
-          ++ show (fromInteger ((curReadNum - prevReadNum) * toInteger entrySize) / 1024 / 1024)
+          ++ show (fromInteger ((curReadNum - prevReadNum) * toInteger entrySize) / 1024 / 1024 / 5)
           ++ " MB/s"
       printSpeed curAppendedNum curReadNum
