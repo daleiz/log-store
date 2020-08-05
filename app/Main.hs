@@ -116,7 +116,7 @@ main = do
       withLogStore
         Config
           { rootDbPath = dbPath,
-            dataCfWriteBufferSize = 1024 * 1024 * 1024,
+            dataCfWriteBufferSize = 200 * 1024 * 1024,
             dbWriteBufferSize = 0,
             enableDBStatistics = True,
             dbStatsDumpPeriodSec = 2
