@@ -160,6 +160,7 @@ readTask expectedEntry dict batchSize logName = do
       liftIO $
         S.mapM_
           ( \res -> do
+              print $ snd res
               when (fst res /= expectedEntry) $
                 putStrLn $ "read entry error, got " ++ show res
           )
