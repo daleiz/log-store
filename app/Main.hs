@@ -163,7 +163,7 @@ readTask expectedEntry dict batchSize logName = do
       liftIO $
         S.mapM_
           ( \res -> do
-              print res
+              -- print res
               let innerEntry = snd res
               when (getEntry innerEntry /= expectedEntry) $ do
                 putStrLn $ "read entry error, got " ++ show res ++ 
