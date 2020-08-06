@@ -168,8 +168,7 @@ readTask expectedEntry dict batchSize logName = do
       readNum <- liftIO $ S.length stream
       if readNum == 0
         then do
-          liftIO $ threadDelay 10000
-          readBatch lh start end
+          liftIO $ putStrLn $ "read finish"
         else do
           increaseBy dict readEntryNumKey $ toInteger readNum
           let nextStart = start + fromIntegral readNum
