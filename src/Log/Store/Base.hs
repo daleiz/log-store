@@ -19,6 +19,7 @@ module Log.Store.Base
     appendEntry,
     appendEntries,
     readEntries,
+    readEntries11,
     close,
     shutDown,
     withLogStore,
@@ -52,6 +53,7 @@ import Log.Store.Internal
 import Log.Store.Utils
 import Streamly (Serial)
 import qualified Streamly.Prelude as S
+import Data.Bifunctor (bimap)
 
 -- | Config info
 data Config = Config
@@ -333,6 +335,29 @@ readEntries LogHandle {..} firstKey lastKey = do
       & S.map snd
       & S.map decodeInnerEntry
       & S.map (\(InnerEntry entryId entry) -> (entry, entryId))
+  where
+    first =
+      case firstKey of
+        Nothing -> Just $ encodeEntryKey $ EntryKey logID firstNormalEntryId
+        Just k -> Just $ encodeEntryKey $ EntryKey logID k
+    last =
+      case lastKey of
+        Nothing -> Just $ encodeEntryKey $ EntryKey logID maxEntryId
+        Just k -> Just $ encodeEntryKey $ EntryKey logID k
+        
+-- | read entries whose entryId in [firstEntry, LastEntry]
+readEntries11 ::
+  MonadIO m =>
+  LogHandle ->
+  Maybe EntryID ->
+  Maybe EntryID ->
+  ReaderT Context m (Serial (EntryKey, InnerEntry))
+readEntries11 LogHandle {..} firstKey lastKey = do
+  Context {..} <- ask
+  let kvStream = R.rangeCF dbHandle def dataCFHandle first last
+  return $
+    kvStream
+      & S.map (bimap decodeEntryKey decodeInnerEntry)
   where
     first =
       case firstKey of

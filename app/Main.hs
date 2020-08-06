@@ -18,6 +18,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import Data.Word (Word64)
 import Log.Store.Base
+import Log.Store.Internal
 import qualified Streamly.Internal.Data.Fold as FL
 import qualified Streamly.Prelude as S
 import System.Clock (Clock (Monotonic), TimeSpec (..), getTime)
@@ -154,14 +155,16 @@ readTask expectedEntry dict batchSize logName = do
   lh <- open logName defaultOpenOptions
   readBatch lh 1 $ fromIntegral batchSize
   where
+    getEntry :: InnerEntry -> Entry
+    getEntry (InnerEntry _ entry) = entry 
     readBatch :: MonadIO m => LogHandle -> EntryID -> EntryID -> ReaderT Context m ()
     readBatch lh start end = do
-      stream <- readEntries lh (Just start) (Just end)
+      stream <- readEntries11 lh (Just start) (Just end)
       liftIO $
         S.mapM_
           ( \res -> do
-              print $ snd res
-              when (fst res /= expectedEntry) $ do
+              print res
+              when (getEntry (snd res) /= expectedEntry) $ do
                 putStrLn $ "read entry error, got " ++ show res
                 throwIO $ userError "read error"
           )

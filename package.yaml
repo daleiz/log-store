@@ -43,6 +43,7 @@ library:
   source-dirs: src
   exposed-modules:
   - Log.Store.Base
+  - Log.Store.Internal
   ghc-options:
   - -W
 
