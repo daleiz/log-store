@@ -160,15 +160,16 @@ readTask expectedEntry dict batchSize logName = do
       liftIO $
         S.mapM_
           ( \res -> do
-              -- print $ snd res
-              when (fst res /= expectedEntry) $
+              print $ snd res
+              when (fst res /= expectedEntry) $ do
                 putStrLn $ "read entry error, got " ++ show res
+                throwIO $ userError "read error"
           )
           stream
       readNum <- liftIO $ S.length stream
       if readNum == 0
         then do
-          liftIO $ putStrLn $ "read finish"
+          liftIO $ putStrLn "read finish"
         else do
           increaseBy dict readEntryNumKey $ toInteger readNum
           let nextStart = start + fromIntegral readNum
