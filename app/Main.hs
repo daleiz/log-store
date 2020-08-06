@@ -164,8 +164,10 @@ readTask expectedEntry dict batchSize logName = do
         S.mapM_
           ( \res -> do
               print res
-              when (getEntry (snd res) /= expectedEntry) $ do
-                putStrLn $ "read entry error, got " ++ show res
+              let innerEntry = snd res
+              when (getEntry innerEntry /= expectedEntry) $ do
+                putStrLn $ "read entry error, got " ++ show res ++ 
+                  " ,src: " ++ show (encodeInnerEntry innerEntry)
                 throwIO $ userError "read error"
           )
           stream
