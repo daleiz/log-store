@@ -46,28 +46,28 @@ maxEntryId = 0xffffffffffffffff
 firstNormalEntryId :: EntryID
 firstNormalEntryId = 1
 
--- | entry content with some meta info
-data InnerEntry = InnerEntry EntryID B.ByteString
-  deriving (Eq, Show)
-
-encodeInnerEntry :: InnerEntry -> B.ByteString
-encodeInnerEntry (InnerEntry entryId content) =
-  builderBytes $ word64BE entryId `mappend` bytes content
-
-decodeInnerEntry :: B.ByteString -> InnerEntry
-decodeInnerEntry bs =
-  if rem /= B.empty
-    then throw $ LogStoreDecodeException "input error"
-    else case res of
-      Left s -> throw $ LogStoreDecodeException s
-      Right v -> v
-  where
-    (res, rem) = decode' bs
-    decode' = runGet $ do
-      entryId <- getWord64be
-      len <- remaining
-      content <- getByteString len
-      return $ InnerEntry entryId content
+---- | entry content with some meta info
+--data InnerEntry = InnerEntry EntryID B.ByteString
+--  deriving (Eq, Show)
+--
+--encodeInnerEntry :: InnerEntry -> B.ByteString
+--encodeInnerEntry (InnerEntry entryId content) =
+--  builderBytes $ word64BE entryId `mappend` bytes content
+--
+--decodeInnerEntry :: B.ByteString -> InnerEntry
+--decodeInnerEntry bs =
+--  if rem /= B.empty
+--    then throw $ LogStoreDecodeException "input error"
+--    else case res of
+--      Left s -> throw $ LogStoreDecodeException s
+--      Right v -> v
+--  where
+--    (res, rem) = decode' bs
+--    decode' = runGet $ do
+--      entryId <- getWord64be
+--      len <- remaining
+--      content <- getByteString len
+--      return $ InnerEntry entryId content
 
 -- | key used when save entry to rocksdb
 data EntryKey = EntryKey LogID EntryID

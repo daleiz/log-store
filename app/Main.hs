@@ -155,19 +155,16 @@ readTask expectedEntry dict batchSize logName = do
   lh <- open logName defaultOpenOptions
   readBatch lh 1 $ fromIntegral batchSize
   where
-    getEntry :: InnerEntry -> Entry
-    getEntry (InnerEntry _ entry) = entry 
     readBatch :: MonadIO m => LogHandle -> EntryID -> EntryID -> ReaderT Context m ()
     readBatch lh start end = do
-      stream <- readEntries11 lh (Just start) (Just end)
+      stream <- readEntries lh (Just start) (Just end)
       liftIO $
         S.mapM_
           ( \res -> do
               -- print res
-              let innerEntry = snd res
-              when (getEntry innerEntry /= expectedEntry) $ do
-                putStrLn $ "read entry error, got " ++ show res ++ 
-                  " ,src: " ++ show (encodeInnerEntry innerEntry)
+              let entry = fst res
+              when (entry /= expectedEntry) $ do
+                putStrLn $ "read entry error, got " ++ show res
                 throwIO $ userError "read error"
           )
           stream
