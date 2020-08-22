@@ -1,17 +1,23 @@
 {-# LANGUAGE BinaryLiterals #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Log.Store.Internal where
 
 import ByteString.StrictBuilder (builderBytes, word64BE)
-import Control.Exception (throw)
+import Control.Exception (bracket, throw)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+-- import Control.Monad.Trans (lift)
+-- import Control.Exception.Lifted (bracket)
+-- import Control.Monad.Trans.Control (MonadBaseControl)
+-- import Control.Monad.Trans.Resource (MonadUnliftIO, allocate, runResourceT)
 import Data.Atomics (atomicModifyIORefCAS)
 import Data.Binary.Strict.Get (getWord64be, runGet)
-import Data.ByteString as B
+import qualified Data.ByteString as B
 import Data.Default (def)
 import Data.IORef (IORef)
-import Data.Text as T
+import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.Word (Word64)
 import qualified Database.RocksDB as R
@@ -115,7 +121,7 @@ createDataCf db cfName cfWriteBufferSize =
         R.hardPendingCompactionBytesLimit = 18446744073709551615,
         R.blockBasedTableOptions =
           R.defaultBlockBasedOptions
-            { R.cacheIndexAndFilterBlocks = True 
+            { R.cacheIndexAndFilterBlocks = True
             }
       }
     cfName
@@ -130,7 +136,7 @@ openReadOnlyCf dbPath cfName = do
         R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
       ]
       False
-  R.destroyColumnFamily $ Prelude.head cfs
+  R.destroyColumnFamily $ head cfs
   return (dbForRead, Prelude.head $ Prelude.tail cfs)
 
 getCfSize :: MonadIO m => R.DB -> R.ColumnFamily -> m Word64
@@ -139,3 +145,93 @@ getCfSize db cf = do
   let limitKey = encodeEntryKey $ EntryKey 0xffffffffffffffff 0xffffffffffffffff
   res <- R.approximateSizesCf db cf [R.KeyRange {R.startKey = startKey, R.limitKey = limitKey}]
   return $ Prelude.head res
+
+getDataCfNameSet :: MonadIO m => FilePath -> m [String]
+getDataCfNameSet dbPath = do
+  cfNames <- R.listColumnFamilies def dbPath
+  return $ drop 2 cfNames
+
+-- withCfReadOnly :: MonadUnliftIO m => FilePath -> String -> ((R.DB, R.ColumnFamily) -> m a) -> m a
+-- withCfReadOnly dbPath cfName f = runResourceT $ do
+--   (_, (dbHandle, cfHandles)) <-
+--     allocate
+--       ( R.openForReadOnlyColumnFamilies
+--           def
+--           dbPath
+--           [ R.ColumnFamilyDescriptor {R.name = defaultCFName, R.options = def},
+--             R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
+--           ]
+--           False
+--       )
+--       releaseDbResource
+--
+--   lift $ f (dbHandle, cfHandles !! 1)
+
+-- withCfReadOnly :: MonadBaseControl IO m => FilePath -> String -> ((R.DB, R.ColumnFamily) -> m a) -> m a
+-- withCfReadOnly dbPath cfName =
+--   bracket
+--        ( do
+--           (dbHandle, cfHandles) <-
+--             R.openForReadOnlyColumnFamilies
+--               def
+--               dbPath
+--               [ R.ColumnFamilyDescriptor {R.name = defaultCFName, R.options = def},
+--                 R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
+--               ]
+--               False
+--           R.destroyColumnFamily $ head cfHandles
+--           return (dbHandle, cfHandles !! 1)
+--        )
+--        (
+--          \ (dbHandle, cfHandle) -> do
+--             R.destroyColumnFamily cfHandle
+--             R.close dbHandle
+--        )
+
+withCfReadOnly :: FilePath -> String -> ((R.DB, R.ColumnFamily) -> IO a) -> IO a
+withCfReadOnly dbPath cfName =
+  bracket
+    ( do
+        (dbHandle, cfHandles) <-
+          R.openForReadOnlyColumnFamilies
+            def
+            dbPath
+            [ R.ColumnFamilyDescriptor {R.name = defaultCFName, R.options = def},
+              R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
+            ]
+            False
+        R.destroyColumnFamily $ head cfHandles
+        return (dbHandle, cfHandles !! 1)
+    )
+    ( \(dbHandle, cfHandle) -> do
+        R.destroyColumnFamily cfHandle
+        R.close dbHandle
+    )
+
+openCFReadOnly :: FilePath -> String -> IO CFResourcesForRead
+openCFReadOnly dbPath cfName =
+  do
+    (dbHandle, cfHandles) <-
+      R.openForReadOnlyColumnFamilies
+        def
+        dbPath
+        [ R.ColumnFamilyDescriptor {R.name = defaultCFName, R.options = def},
+          R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
+        ]
+        False
+    R.destroyColumnFamily $ head cfHandles
+    return
+      CFResourcesForRead
+        { dbHandleForRead = dbHandle,
+          cfHandleForRead = cfHandles !! 1
+        }
+
+data CFResourcesForRead = CFResourcesForRead
+  { dbHandleForRead :: R.DB,
+    cfHandleForRead :: R.ColumnFamily
+  }
+
+releaseCFResourcesForRead :: MonadIO m => CFResourcesForRead -> m ()
+releaseCFResourcesForRead CFResourcesForRead {..} = do
+  R.destroyColumnFamily cfHandleForRead
+  R.close dbHandleForRead

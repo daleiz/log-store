@@ -41,6 +41,8 @@ dependencies:
 - async
 - time
 - concurrent-extra
+- lifted-base 
+- monad-control 
 
 library:
   source-dirs: src

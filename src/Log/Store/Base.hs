@@ -47,7 +47,7 @@ import Data.Default (def)
 import Data.Function ((&))
 import qualified Data.HashMap.Strict as H
 import Data.Hashable (Hashable)
-import Data.IORef (IORef, newIORef)
+import Data.IORef (IORef, newIORef, readIORef)
 import Data.List.NonEmpty (fromList)
 import Data.Maybe (isJust)
 import qualified Data.Text as T
@@ -86,10 +86,9 @@ defaultConfig =
 data Context = Context
   { dbPath :: FilePath,
     dbHandle :: R.DB,
-    defaultCFHandle :: R.ColumnFamily,
     metaCFHandle :: R.ColumnFamily,
     curDataCFHandleRef :: RWV.RWVar R.ColumnFamily,
-    dataCfHandlesForReadRef :: IORef [R.ColumnFamily],
+    resourcesForReadRef :: IORef [CFResourcesForRead],
     logHandleCache :: TVar (H.HashMap LogHandleKey LogHandle),
     maxLogIdRef :: IORef LogID,
     backgroundShardingTask :: Async ()
@@ -101,16 +100,14 @@ shardingTask ::
   R.DB ->
   Word64 ->
   RWV.RWVar R.ColumnFamily ->
-  IORef [R.ColumnFamily] ->
   IO ()
 shardingTask
-  partitionDuration
+  partitionInterval
   partitionSizeLimit
   db
   cfWriteBufferSize
-  curDataCfRef
-  dataCfsForReadRef = forever $ do
-    threadDelay $ partitionDuration * 60 * 1000000
+  curDataCfRef = forever $ do
+    threadDelay $ partitionInterval * 60 * 1000000
     curCf <- RWV.with curDataCfRef return
     curDataCfSize <- getCfSize db curCf
     when
@@ -118,62 +115,80 @@ shardingTask
       $ do
         newCfName <- generateDataCfName
         newCfHandle <- createDataCf db newCfName cfWriteBufferSize
-        RWV.modify_ curDataCfRef (\curCf -> R.flushCF db def curCf >> return newCfHandle)
-        atomicModifyIORefCAS dataCfsForReadRef (\cfs -> (cfs ++ [newCfHandle], cfs))
+        RWV.modify_ curDataCfRef (\curCf -> R.destroyColumnFamily curCf >> return newCfHandle)
         return ()
+
+openDBAndMetaCf :: MonadIO m => Config -> m (R.DB, R.ColumnFamily)
+openDBAndMetaCf Config {..} = do
+  -- first, create db if missing
+  tempDb <-
+    R.open
+      R.defaultDBOptions
+        { R.createIfMissing = True
+        }
+      rootDbPath
+  R.close tempDb
+
+  cfNames <- R.listColumnFamilies def rootDbPath
+  if length cfNames == 1
+    then -- create metacf if missing
+    do
+      (dbHandle, cfHandles) <-
+        R.openColumnFamilies
+          R.defaultDBOptions
+            { R.createIfMissing = True,
+              R.createMissingColumnFamilies = True,
+              R.maxBackgroundCompactions = 1,
+              R.maxBackgroundFlushes = 1,
+              R.enableStatistics = enableDBStatistics,
+              R.statsDumpPeriodSec = dbStatsDumpPeriodSec
+            }
+          rootDbPath
+          [ R.ColumnFamilyDescriptor
+              { name = defaultCFName,
+                options = R.defaultDBOptions
+              },
+            R.ColumnFamilyDescriptor
+              { name = metaCFName,
+                options = R.defaultDBOptions
+              }
+          ]
+      R.destroyColumnFamily (head cfHandles)
+      return (dbHandle, cfHandles !! 1)
+    else -- open metaCf, must open all cfs and then close others.
+    do
+      let cfDescriptors = map (\cfName -> R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}) cfNames
+      (dbHandle, cfHandles) <-
+        R.openColumnFamilies
+          R.defaultDBOptions
+            { R.maxBackgroundCompactions = 1,
+              R.maxBackgroundFlushes = 1,
+              R.enableStatistics = enableDBStatistics,
+              R.statsDumpPeriodSec = dbStatsDumpPeriodSec
+            }
+          rootDbPath
+          cfDescriptors
+      R.destroyColumnFamily (head cfHandles)
+      mapM_ R.destroyColumnFamily (drop 2 cfHandles)
+      return (dbHandle, cfHandles !! 1)
 
 -- | init Context using Config
 -- 1. open (or create) db, metaCF, create a new dataCF
 -- 2. init context variables: logHandleCache, maxLogIdRef
 -- 3. start background task: shardingTask
 initialize :: MonadIO m => Config -> m Context
-initialize Config {..} =
+initialize cfg@Config {..} =
   liftIO $ do
-    -- ensure db and metaCF exists
-    tempDbResource <-
-      R.openColumnFamilies
-        R.defaultDBOptions
-          { R.createIfMissing = True,
-            R.createMissingColumnFamilies = True
-          }
-        rootDbPath
-        [ R.ColumnFamilyDescriptor
-            { name = defaultCFName,
-              options = R.defaultDBOptions
-            },
-          R.ColumnFamilyDescriptor
-            { name = metaCFName,
-              options = R.defaultDBOptions
-            }
-        ]
-    releaseDbResource tempDbResource
-
-    -- open already exited CFs, metaCF for read && write, dataCFs only for read
-    cfNames <- R.listColumnFamilies def rootDbPath
-    let cfDescriptors = map (\cfName -> R.ColumnFamilyDescriptor {name = cfName, options = def}) cfNames
-    (db, cfHandles) <-
-      R.openColumnFamilies
-        R.defaultDBOptions
-          { R.maxBackgroundCompactions = 1,
-            R.maxBackgroundFlushes = 1,
-            R.enableStatistics = enableDBStatistics,
-            R.statsDumpPeriodSec = dbStatsDumpPeriodSec
-          }
-        rootDbPath
-        cfDescriptors
+    (db, metaCf) <- openDBAndMetaCf cfg
 
     newDataCfName <- generateDataCfName
     newDataCfHandle <- createDataCf db newDataCfName dataCfWriteBufferSize
-
-    let defaultCf = head cfHandles
-    let metaCf = head $ tail cfHandles
-    let dataCfsForRead = tail $ tail $ cfHandles ++ [newDataCfHandle]
 
     cache <- newTVarIO H.empty
     maxLogId <- getMaxLogId db metaCf
     logIdRef <- newIORef maxLogId
     newDataCfRef <- RWV.new newDataCfHandle
-    dataCfsForReadRef <- newIORef dataCfsForRead
+    resourcesForRead <- newIORef []
     bgShardingTask <-
       async $
         shardingTask
@@ -182,15 +197,13 @@ initialize Config {..} =
           db
           dataCfWriteBufferSize
           newDataCfRef
-          dataCfsForReadRef
     return
       Context
         { dbPath = rootDbPath,
           dbHandle = db,
-          defaultCFHandle = defaultCf,
           metaCFHandle = metaCf,
           curDataCFHandleRef = newDataCfRef,
-          dataCfHandlesForReadRef = dataCfsForReadRef,
+          resourcesForReadRef = resourcesForRead,
           logHandleCache = cache,
           maxLogIdRef = logIdRef,
           backgroundShardingTask = bgShardingTask
@@ -316,18 +329,37 @@ open name opts@OpenOptions {..} = do
           createIfMissing
         Just _ -> True
 
+-- getDataCfHandlesForRead :: FilePath -> IO (R.DB, [R.ColumnFamily])
+-- getDataCfHandlesForRead dbPath = do
+--   cfNames <- R.listColumnFamilies def dbPath
+--   let dataCfNames = filter (/= metaCFName) cfNames
+--   let dataCfDescriptors = map (\cfName -> R.ColumnFamilyDescriptor {name = cfName, options = def}) dataCfNames
+--   (dbForReadOnly, handles) <-
+--     R.openForReadOnlyColumnFamilies
+--       def
+--       dbPath
+--       dataCfDescriptors
+--       False
+--   return (dbForReadOnly, tail handles)
+--
+
 getMaxEntryId :: MonadIO m => LogID -> ReaderT Context m EntryID
 getMaxEntryId logId = do
   Context {..} <- ask
-  dataCfs <- liftIO $ atomicModifyIORefCAS dataCfHandlesForReadRef (\cfs -> (cfs, cfs))
-  res <- foldM (f dbHandle) Nothing (reverse dataCfs)
+  dataCfNames <- getDataCfNameSet dbPath
+  res <- foldM (f dbPath) Nothing (reverse dataCfNames)
   case res of
     Nothing -> liftIO $ throwIO $ LogStoreIOException "getMaxEntryId found nothing"
     Just r -> return r
   where
-    f dbHandleForRead prevRes curCf = 
+    f dbPath prevRes curCfName =
       case prevRes of
-        Nothing -> R.withIteratorCF dbHandleForRead def curCf findMaxEntryIdInCf
+        Nothing ->
+          liftIO $
+            withCfReadOnly
+              dbPath
+              curCfName
+              (\(dbForRead, cfForRead) -> R.withIteratorCF dbForRead def cfForRead findMaxEntryIdInCf)
         Just res -> return $ Just res
 
     findMaxEntryIdInCf :: MonadIO m => R.Iterator -> m (Maybe EntryID)
@@ -344,24 +376,6 @@ getMaxEntryId logId = do
           case errStr of
             Nothing -> return Nothing
             Just str -> liftIO $ throwIO $ LogStoreIOException $ "getMaxEntryId error: " ++ str
-
--- getDataCfHandlesForRead :: FilePath -> IO (R.DB, [R.ColumnFamily])
--- getDataCfHandlesForRead dbPath = do
---   cfNames <- R.listColumnFamilies def dbPath
---   let dataCfNames = filter (/= metaCFName) cfNames
---   let dataCfDescriptors = map (\cfName -> R.ColumnFamilyDescriptor {name = cfName, options = def}) dataCfNames
---   (dbForReadOnly, handles) <-
---     R.openForReadOnlyColumnFamilies
---       def
---       dbPath
---       dataCfDescriptors
---       False
---   return (dbForReadOnly, tail handles)
---
-releaseDbResource :: (R.DB, [R.ColumnFamily]) -> IO ()
-releaseDbResource (db, cfs) = do
-  mapM_ R.destroyColumnFamily cfs
-  R.close db
 
 exists :: MonadIO m => LogName -> ReaderT Context m Bool
 exists name = do
@@ -440,22 +454,20 @@ readEntries ::
   ReaderT Context m (Serial (Entry, EntryID))
 readEntries LogHandle {..} firstKey lastKey = do
   Context {..} <- ask
-  dataCfs <- liftIO $ atomicModifyIORefCAS dataCfHandlesForReadRef (\cfs -> (cfs, cfs))
-  streams <- mapM (readEntriesInCf dbHandle) dataCfs
+  dataCfNames <- getDataCfNameSet dbPath
+  streams <- mapM (readEntriesInCf resourcesForReadRef dbPath) dataCfNames
   return $ sconcat $ fromList streams
   where
-    --    readEntriesInCf ::
-    --      MonadIO m =>
-    --      R.DB ->
-    --      R.ColumnFamily ->
-    --      ReaderT Context m (Serial (Entry, EntryID))
-    readEntriesInCf db dataCf = do
-      let kvStream = R.rangeCF db def dataCf start end
-      return $
-        kvStream
-          & S.map (first decodeEntryKey)
-          -- & S.filter (\(EntryKey logId _, _) -> logId == logID)
-          & S.map (\(EntryKey _ entryId, entry) -> (entry, entryId))
+    readEntriesInCf resRef dbPath dataCfName =
+      liftIO $ do
+        cfr@CFResourcesForRead {..} <- openCFReadOnly dbPath dataCfName
+        atomicModifyIORefCAS resRef (\res -> (res ++ [cfr], res))
+        let kvStream = R.rangeCF dbHandleForRead def cfHandleForRead start end
+        return $
+          kvStream
+            & S.map (first decodeEntryKey)
+            -- & S.filter (\(EntryKey logId _, _) -> logId == logID)
+            & S.map (\(EntryKey _ entryId, entry) -> (entry, entryId))
 
     start =
       case firstKey of
@@ -480,12 +492,10 @@ shutDown :: MonadIO m => ReaderT Context m ()
 shutDown = do
   Context {..} <- ask
   liftIO $ cancel backgroundShardingTask
-  R.destroyColumnFamily defaultCFHandle
+  resRef <- liftIO $ readIORef resourcesForReadRef
+  mapM_ releaseCFResourcesForRead resRef
   R.destroyColumnFamily metaCFHandle
-  -- curDataCf <- liftIO $ RWV.with curDataCFHandleRef return
-  -- R.destroyColumnFamily curDataCf
-  dataCfs <- liftIO $ atomicModifyIORefCAS dataCfHandlesForReadRef (\cfs -> (cfs, cfs))
-  mapM_ R.destroyColumnFamily dataCfs
+  liftIO $ RWV.with curDataCFHandleRef R.destroyColumnFamily
   R.close dbHandle
 
 -- | function that wrap initialize and resource release.
