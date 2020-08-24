@@ -67,5 +67,5 @@ packages:
 
 extra-deps:
 - github: hstream-io/haskell-rocksdb-bindings
-  commit: 0c7f5420e6eadca901f242971ef63dc5a9b108fc
+  commit: 4b6ed4c0e4591393504b8ce1ecca490030b1e385 
 - binary-strict-0.4.8.6
