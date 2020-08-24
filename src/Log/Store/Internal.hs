@@ -118,11 +118,7 @@ createDataCf db cfName cfWriteBufferSize =
         R.level0SlowdownWritesTrigger = -1,
         R.level0StopWritesTrigger = -1,
         R.softPendingCompactionBytesLimit = 18446744073709551615,
-        R.hardPendingCompactionBytesLimit = 18446744073709551615,
-        R.blockBasedTableOptions =
-          R.defaultBlockBasedOptions
-            { R.cacheIndexAndFilterBlocks = True
-            }
+        R.hardPendingCompactionBytesLimit = 18446744073709551615
       }
     cfName
 

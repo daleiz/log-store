@@ -79,7 +79,7 @@ defaultConfig =
       dataCfWriteBufferSize = 200 * 1024 * 1024,
       enableDBStatistics = False,
       dbStatsDumpPeriodSec = 600,
-      dataCfPartitionDuration = 2, -- minutes
+      dataCfPartitionDuration = 1, -- minutes
       dataCfPartitionSizeLimit = 1 -- GB
     }
 
@@ -140,7 +140,7 @@ openDBAndMetaCf Config {..} = do
               R.createMissingColumnFamilies = True,
               R.maxBackgroundCompactions = 1,
               R.maxBackgroundFlushes = 1,
-              R.maxOpenFiles = 256,
+              R.maxOpenFiles = 128,
               R.enableStatistics = enableDBStatistics,
               R.statsDumpPeriodSec = dbStatsDumpPeriodSec
             }
