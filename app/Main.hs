@@ -308,3 +308,4 @@ printAppendAndReadSpeed dict entrySize = do
           ++ show (fromInteger ((curReadNum - prevReadNum) * toInteger entrySize) / 1024 / 1024 / duration)
           ++ " MB/s"
       printSpeed curAppendedNum curReadNum
+

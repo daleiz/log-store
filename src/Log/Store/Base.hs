@@ -30,7 +30,7 @@ module Log.Store.Base
   )
 where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.Async (Async, async, cancel)
 import qualified Control.Concurrent.ReadWriteVar as RWV
 import Control.Exception (throwIO)
@@ -140,7 +140,7 @@ openDBAndMetaCf Config {..} = do
               R.createMissingColumnFamilies = True,
               R.maxBackgroundCompactions = 1,
               R.maxBackgroundFlushes = 1,
-              R.maxOpenFiles = 256,
+              R.maxOpenFiles = 16,
               R.enableStatistics = enableDBStatistics,
               R.statsDumpPeriodSec = dbStatsDumpPeriodSec
             }
@@ -198,6 +198,9 @@ initialize cfg@Config {..} =
           db
           dataCfWriteBufferSize
           newDataCfRef
+
+    forkIO $ outputMemStats rootDbPath "mem-usage.txt"
+
     return
       Context
         { dbPath = rootDbPath,

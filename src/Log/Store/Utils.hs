@@ -35,3 +35,4 @@ encodeText = encodeUtf8
 posixTimeToSeconds :: POSIXTime -> Int64
 posixTimeToSeconds =
   floor . nominalDiffTimeToSeconds
+

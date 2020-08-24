@@ -6,12 +6,15 @@
 module Log.Store.Internal where
 
 import ByteString.StrictBuilder (builderBytes, word64BE)
-import Control.Exception (bracket, throw)
-import Control.Monad.IO.Class (MonadIO, liftIO)
 -- import Control.Monad.Trans (lift)
 -- import Control.Exception.Lifted (bracket)
 -- import Control.Monad.Trans.Control (MonadBaseControl)
 -- import Control.Monad.Trans.Resource (MonadUnliftIO, allocate, runResourceT)
+
+import Control.Concurrent (threadDelay)
+import Control.Exception (bracket, throw, throwIO)
+import Control.Monad (forever)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Atomics (atomicModifyIORefCAS)
 import Data.Binary.Strict.Get (getWord64be, runGet)
 import qualified Data.ByteString as B
@@ -23,6 +26,7 @@ import Data.Word (Word64)
 import qualified Database.RocksDB as R
 import Log.Store.Exception
 import Log.Store.Utils
+import qualified Data.ByteString.Char8 as BC
 
 type LogName = T.Text
 
@@ -235,3 +239,34 @@ releaseCFResourcesForRead :: MonadIO m => CFResourcesForRead -> m ()
 releaseCFResourcesForRead CFResourcesForRead {..} = do
   R.destroyColumnFamily cfHandleForRead
   R.close dbHandleForRead
+
+outputMemStats :: FilePath -> FilePath -> IO ()
+outputMemStats dbPath outputPath = forever $ do
+  threadDelay 3000000
+  cfNames <- R.listColumnFamilies def dbPath
+  let cfDescriptors = map (\cfName -> R.ColumnFamilyDescriptor {name = cfName, options = def}) cfNames
+  (dbForReadOnly, handles) <-
+    R.openForReadOnlyColumnFamilies
+      def
+      dbPath
+      cfDescriptors
+      False
+  mapM_ (uncurry $ outputMemStatsForCF outputPath dbForReadOnly) (zip cfNames handles)
+
+  mapM_ R.destroyColumnFamily handles
+  R.close dbForReadOnly
+  where
+    getPropertyValueCF' db cf propName = do
+      res <- R.getPropertyValueCF db cf propName 
+      case res of
+        Nothing -> throwIO $ LogStoreIOException "get db property failed"
+        Just s -> return s
+
+    outputMemStatsForCF path db cfName cf = do
+      s1 <- getPropertyValueCF' db cf "rocksdb.block-cache-usage"
+      s2 <- getPropertyValueCF' db cf "rocksdb.estimate-table-readers-mem"
+      s3 <- getPropertyValueCF' db cf "rocksdb.cur-size-all-mem-tables"
+      s4 <- getPropertyValueCF' db cf "rocksdb.block-cache-pinned-usage"
+      let title = "---------------- " `B.append` BC.pack cfName `B.append`" ----------------\n"
+      let s = title `B.append` s1 `B.append` " " `B.append` s2 `B.append` " " `B.append` s3 `B.append` " " `B.append` s4 `B.append` "\n"
+      B.appendFile path s
