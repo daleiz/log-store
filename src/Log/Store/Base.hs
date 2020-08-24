@@ -140,6 +140,7 @@ openDBAndMetaCf Config {..} = do
               R.createMissingColumnFamilies = True,
               R.maxBackgroundCompactions = 1,
               R.maxBackgroundFlushes = 1,
+              R.dbWriteBufferSize = 600 * 1024 * 1024,
               R.maxOpenFiles = 128,
               R.enableStatistics = enableDBStatistics,
               R.statsDumpPeriodSec = dbStatsDumpPeriodSec
