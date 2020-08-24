@@ -115,7 +115,7 @@ shardingTask
       $ do
         newCfName <- generateDataCfName
         newCfHandle <- createDataCf db newCfName cfWriteBufferSize
-        RWV.modify_ curDataCfRef (\curCf -> R.destroyColumnFamily curCf >> return newCfHandle)
+        RWV.modify_ curDataCfRef (\curCf -> R.flushCF db def curCf >> R.destroyColumnFamily curCf >> return newCfHandle)
         return ()
 
 openDBAndMetaCf :: MonadIO m => Config -> m (R.DB, R.ColumnFamily)
@@ -140,7 +140,7 @@ openDBAndMetaCf Config {..} = do
               R.createMissingColumnFamilies = True,
               R.maxBackgroundCompactions = 1,
               R.maxBackgroundFlushes = 1,
-              R.dbWriteBufferSize = 600 * 1024 * 1024,
+              -- R.dbWriteBufferSize = 600 * 1024 * 1024,
               R.maxOpenFiles = 128,
               R.enableStatistics = enableDBStatistics,
               R.statsDumpPeriodSec = dbStatsDumpPeriodSec
