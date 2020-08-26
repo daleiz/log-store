@@ -6,23 +6,29 @@
 module Log.Store.Internal where
 
 import ByteString.StrictBuilder (builderBytes, word64BE)
-import Control.Exception (bracket, throw)
-import Control.Monad.IO.Class (MonadIO, liftIO)
 -- import Control.Monad.Trans (lift)
 -- import Control.Exception.Lifted (bracket)
 -- import Control.Monad.Trans.Control (MonadBaseControl)
 -- import Control.Monad.Trans.Resource (MonadUnliftIO, allocate, runResourceT)
+
+import qualified Control.Concurrent.ReadWriteLock as RWL
+import Control.Exception (bracket, throw, throwIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Atomics (atomicModifyIORefCAS)
 import Data.Binary.Strict.Get (getWord64be, runGet)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as BC
 import Data.Default (def)
 import Data.IORef (IORef)
+import Data.List (isPrefixOf, sort)
 import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.Word (Word64)
 import qualified Database.RocksDB as R
 import Log.Store.Exception
 import Log.Store.Utils
+import System.Directory (listDirectory)
+import System.FilePath.Posix ((</>))
 
 type LogName = T.Text
 
@@ -53,9 +59,6 @@ minEntryId = 0
 maxEntryId :: EntryID
 maxEntryId = 0xffffffffffffffff
 
-firstNormalEntryId :: EntryID
-firstNormalEntryId = 1
-
 -- | key used when save entry to rocksdb
 data EntryKey = EntryKey LogID EntryID
   deriving (Eq, Show)
@@ -79,11 +82,11 @@ decodeEntryKey bs =
 
 -- | it is used to generate a new logId while
 -- | creating a new log.
-generateLogId :: MonadIO m => R.DB -> R.ColumnFamily -> IORef LogID -> m LogID
-generateLogId db cf logIdRef =
+generateLogId :: MonadIO m => R.DB -> IORef LogID -> m LogID
+generateLogId db logIdRef =
   liftIO $ do
     newId <- atomicModifyIORefCAS logIdRef (\curId -> (curId + 1, curId + 1))
-    R.putCF db def cf maxLogIdKey (encodeWord64 newId)
+    R.put db def maxLogIdKey (encodeWord64 newId)
     return newId
 
 -- | generate entry Id
@@ -93,145 +96,62 @@ generateEntryId entryIdRef =
   liftIO $
     atomicModifyIORefCAS entryIdRef (\curId -> (curId + 1, curId + 1))
 
-defaultCFName :: String
-defaultCFName = "default"
+metaDbName :: String
+metaDbName = "meta"
 
-metaCFName :: String
-metaCFName = "meta"
+dataDbNamePrefix :: String
+dataDbNamePrefix = "data-"
 
-dataCFNamePrefix :: String
-dataCFNamePrefix = "data-"
-
-generateDataCfName :: MonadIO m => m String
-generateDataCfName = liftIO $ do
+generateDataDbName :: MonadIO m => m String
+generateDataDbName = liftIO $ do
   posixTime <- getPOSIXTime
-  return $ dataCFNamePrefix ++ show (posixTimeToSeconds posixTime)
+  return $ dataDbNamePrefix ++ show (posixTimeToSeconds posixTime)
 
-createDataCf :: MonadIO m => R.DB -> String -> Word64 -> m R.ColumnFamily
-createDataCf db cfName cfWriteBufferSize =
-  R.createColumnFamily
-    db
+createDataDb :: MonadIO m => FilePath -> String -> Word64 -> m R.DB
+createDataDb dbPath dbName cfWriteBufferSize =
+  R.open
     R.defaultDBOptions
-      { R.writeBufferSize = cfWriteBufferSize,
+      { R.createIfMissing = True,
+        R.writeBufferSize = cfWriteBufferSize,
         R.disableAutoCompactions = True,
         R.level0FileNumCompactionTrigger = -1,
         R.level0SlowdownWritesTrigger = -1,
         R.level0StopWritesTrigger = -1,
         R.softPendingCompactionBytesLimit = 18446744073709551615,
-        R.hardPendingCompactionBytesLimit = 18446744073709551615,
-        R.blockBasedTableOptions =
-          R.defaultBlockBasedOptions
-            { R.cacheIndexAndFilterBlocks = True
-            }
+        R.hardPendingCompactionBytesLimit = 18446744073709551615
       }
-    cfName
+    (dbPath </> dbName)
 
-openReadOnlyCf :: MonadIO m => FilePath -> String -> m (R.DB, R.ColumnFamily)
-openReadOnlyCf dbPath cfName = do
-  (dbForRead, cfs) <-
-    R.openForReadOnlyColumnFamilies
-      def
-      dbPath
-      [ R.ColumnFamilyDescriptor {R.name = defaultCFName, R.options = def},
-        R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
-      ]
-      False
-  R.destroyColumnFamily $ head cfs
-  return (dbForRead, Prelude.head $ Prelude.tail cfs)
+getFilesNumInDb :: MonadIO m => R.DB -> m Int
+getFilesNumInDb db = liftIO $ do
+  res <- R.getPropertyValue db "rocksdb.num-files-at-level0"
+  case res of
+    Nothing -> throwIO $ LogStoreIOException "getFilesNumInDb error"
+    Just s -> do
+      let parseRes = BC.readInt s
+      case parseRes of
+        Nothing -> throwIO $ LogStoreDecodeException "decode property value error"
+        Just (num, leftStr) ->
+          if B.null leftStr
+            then return num
+            else throwIO $ LogStoreDecodeException "decode property value error"
 
-getCfSize :: MonadIO m => R.DB -> R.ColumnFamily -> m Word64
-getCfSize db cf = do
-  let startKey = encodeEntryKey $ EntryKey 0 0
-  let limitKey = encodeEntryKey $ EntryKey 0xffffffffffffffff 0xffffffffffffffff
-  res <- R.approximateSizesCf db cf [R.KeyRange {R.startKey = startKey, R.limitKey = limitKey}]
-  return $ Prelude.head res
-
-getDataCfNameSet :: MonadIO m => FilePath -> m [String]
-getDataCfNameSet dbPath = do
-  cfNames <- R.listColumnFamilies def dbPath
-  return $ drop 2 cfNames
-
--- withCfReadOnly :: MonadUnliftIO m => FilePath -> String -> ((R.DB, R.ColumnFamily) -> m a) -> m a
--- withCfReadOnly dbPath cfName f = runResourceT $ do
---   (_, (dbHandle, cfHandles)) <-
---     allocate
---       ( R.openForReadOnlyColumnFamilies
---           def
---           dbPath
---           [ R.ColumnFamilyDescriptor {R.name = defaultCFName, R.options = def},
---             R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
---           ]
---           False
---       )
---       releaseDbResource
---
---   lift $ f (dbHandle, cfHandles !! 1)
-
--- withCfReadOnly :: MonadBaseControl IO m => FilePath -> String -> ((R.DB, R.ColumnFamily) -> m a) -> m a
--- withCfReadOnly dbPath cfName =
---   bracket
---        ( do
---           (dbHandle, cfHandles) <-
---             R.openForReadOnlyColumnFamilies
---               def
---               dbPath
---               [ R.ColumnFamilyDescriptor {R.name = defaultCFName, R.options = def},
---                 R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
---               ]
---               False
---           R.destroyColumnFamily $ head cfHandles
---           return (dbHandle, cfHandles !! 1)
---        )
---        (
---          \ (dbHandle, cfHandle) -> do
---             R.destroyColumnFamily cfHandle
---             R.close dbHandle
---        )
-
-withCfReadOnly :: FilePath -> String -> ((R.DB, R.ColumnFamily) -> IO a) -> IO a
-withCfReadOnly dbPath cfName =
+withDbReadOnly :: FilePath -> (R.DB -> IO a) -> IO a
+withDbReadOnly dbPath =
   bracket
-    ( do
-        (dbHandle, cfHandles) <-
-          R.openForReadOnlyColumnFamilies
-            def
-            dbPath
-            [ R.ColumnFamilyDescriptor {R.name = defaultCFName, R.options = def},
-              R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
-            ]
-            False
-        R.destroyColumnFamily $ head cfHandles
-        return (dbHandle, cfHandles !! 1)
-    )
-    ( \(dbHandle, cfHandle) -> do
-        R.destroyColumnFamily cfHandle
-        R.close dbHandle
-    )
-
-openCFReadOnly :: FilePath -> String -> IO CFResourcesForRead
-openCFReadOnly dbPath cfName =
-  do
-    (dbHandle, cfHandles) <-
-      R.openForReadOnlyColumnFamilies
+    ( R.openForReadOnly
         def
         dbPath
-        [ R.ColumnFamilyDescriptor {R.name = defaultCFName, R.options = def},
-          R.ColumnFamilyDescriptor {R.name = cfName, R.options = def}
-        ]
         False
-    R.destroyColumnFamily $ head cfHandles
-    return
-      CFResourcesForRead
-        { dbHandleForRead = dbHandle,
-          cfHandleForRead = cfHandles !! 1
-        }
+    )
+    R.close
 
-data CFResourcesForRead = CFResourcesForRead
-  { dbHandleForRead :: R.DB,
-    cfHandleForRead :: R.ColumnFamily
-  }
-
-releaseCFResourcesForRead :: MonadIO m => CFResourcesForRead -> m ()
-releaseCFResourcesForRead CFResourcesForRead {..} = do
-  R.destroyColumnFamily cfHandleForRead
-  R.close dbHandleForRead
+getReadOnlyDataDbNames :: MonadIO m => FilePath -> RWL.RWLock -> m [FilePath]
+getReadOnlyDataDbNames dbPath rwLock =
+  liftIO $
+    RWL.withRead
+      rwLock
+      ( do
+          res <- listDirectory dbPath
+          return $ init $ sort $ filter (isPrefixOf dataDbNamePrefix) res
+      )

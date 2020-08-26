@@ -18,8 +18,6 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import Data.Word (Word64)
 import Log.Store.Base
-import qualified Streamly.Internal.Data.Fold as FL
-import qualified Streamly.Prelude as S
 import System.Clock (Clock (Monotonic), TimeSpec (..), diffTimeSpec, getTime, toNanoSecs)
 import System.Console.CmdArgs.Implicit
 
@@ -158,33 +156,26 @@ readTask expectedEntry dict batchSize logName = do
   where
     readBatch :: MonadIO m => LogHandle -> EntryID -> EntryID -> ReaderT Context m ()
     readBatch lh start end = do
-      stream <- readEntries lh (Just start) (Just end)
+      res <- readEntries lh (Just start) (Just end)
       liftIO $
-        S.mapM_
-          ( \res -> do
-              when (fst res /= expectedEntry) $ do
+        mapM_
+          ( \content -> do
+              when (snd content /= expectedEntry) $ do
                 putStrLn $ "read entry error, got: " ++ show res
                 throwIO $ userError "read entry error"
           )
-          stream
-      r <- liftIO $ S.last stream
-      case r of
-        Nothing -> do
+          res
+      case res of
+        [] -> do
           liftIO $ threadDelay 1000
           readBatch lh start end
-        Just (_, lastEntryId) -> do
-          let readNum = lastEntryId - start + 1
+        _ -> do
+          let prevEntryId = fst $ last res
+          let readNum = prevEntryId - start + 1
           increaseBy dict readEntryNumKey $ toInteger readNum
-          let nextStart = lastEntryId + 1
+          let nextStart = prevEntryId + 1
           let nextEnd = nextStart + fromIntegral batchSize - 1
           readBatch lh nextStart nextEnd
-
--- record read speed
-drainAll :: MonadIO m => LogHandle -> ReaderT Context m ()
-drainAll lh = do
-  stream <- readEntries lh Nothing Nothing
-  -- liftIO $ S.drain stream
-  liftIO $ S.mapM_ (print . fromIntegral) $ S.intervalsOf 1 FL.length stream
 
 drainBatch :: MonadIO m => EntryID -> LogHandle -> ReaderT Context m ()
 drainBatch batchSize lh = drainBatch' 1 batchSize TimeSpec {sec = 0, nsec = 0} 0
@@ -194,8 +185,8 @@ drainBatch batchSize lh = drainBatch' 1 batchSize TimeSpec {sec = 0, nsec = 0} 0
     drainBatch' :: MonadIO m => EntryID -> EntryID -> TimeSpec -> Word64 -> ReaderT Context m ()
     drainBatch' start end remainingTime accItem = do
       startTime <- liftIO $ getTime Monotonic
-      stream <- readEntries lh (Just start) (Just end)
-      readNum <- liftIO $ S.length stream
+      res <- readEntries lh (Just start) (Just end)
+      let readNum = length res
       endTime <- liftIO $ getTime Monotonic
       let duration = endTime - startTime + remainingTime
       let total = accItem + fromIntegral readNum
