@@ -32,7 +32,10 @@ data Options
       }
   | Read
       { dbPath :: FilePath,
-        logName :: LogName
+        entrySize :: Int,
+        readBatchSize :: Int,
+        logNamePrefix :: T.Text,
+        logNum :: Int
       }
   | Mix
       { dbPath :: FilePath,
@@ -59,7 +62,10 @@ appendOpts =
 readOpts =
   Read
     { dbPath = "/tmp/rocksdb" &= help "db path",
-      logName = "log" &= help "name of log to read"
+      entrySize = 128 &= help "size of each entry (byte)",
+      readBatchSize = 1024 &= help "num of entry each read",
+      logNamePrefix = "log" &= help "name prefix of logs to read",
+      logNum = 1 &= help "num of log to read"
     }
     &= help "read"
 
@@ -82,7 +88,7 @@ main = do
     Append {..} -> do
       numRef <- newIORef (0 :: Integer)
       let dict = H.singleton appendedEntryNumKey numRef
-      printAppendSpeed dict entrySize
+      printSpeed dict appendedEntryNumKey entrySize 3
       withLogStore
         defaultConfig
           { rootDbPath = dbPath,
@@ -91,7 +97,10 @@ main = do
             dbStatsDumpPeriodSec = 10
           }
         (mapConcurrently_ (appendTask dict totalSize entrySize batchSize . T.append logNamePrefix . T.pack . show) [1 .. logNum])
-    Read {..} ->
+    Read {..} -> do
+      numRef <- newIORef (0 :: Integer)
+      let dict = H.singleton readEntryNumKey numRef
+      printSpeed dict readEntryNumKey entrySize 3
       withLogStore
         defaultConfig
           { rootDbPath = dbPath,
@@ -99,11 +108,7 @@ main = do
             enableDBStatistics = True,
             dbStatsDumpPeriodSec = 10
           }
-        ( do
-            lh <- open logName defaultOpenOptions
-            -- drainAll lh
-            drainBatch 1024 lh
-        )
+        (mapConcurrently_ (readTask (nBytesEntry entrySize) dict readBatchSize . T.append logNamePrefix . T.pack . show) [1 .. logNum])
     Mix {..} -> do
       appendedNumRef <- newIORef (0 :: Integer)
       readNumRef <- newIORef (0 :: Integer)
@@ -159,7 +164,7 @@ readTask expectedEntry dict batchSize logName = do
       res <- readEntries lh (Just start) (Just end)
       liftIO $
         mapM_
-          ( \content -> do
+          ( \content ->
               when (snd content /= expectedEntry) $ do
                 putStrLn $ "read entry error, got: " ++ show res
                 throwIO $ userError "read entry error"
@@ -263,28 +268,28 @@ periodRun initDelay interval action = do
       action
   return ()
 
-printAppendSpeed :: H.HashMap B.ByteString (IORef Integer) -> Int -> IO ()
-printAppendSpeed dict entrySize = do
-  forkIO $ do
-    printSpeed 0
+printSpeed :: H.HashMap B.ByteString (IORef Integer) -> B.ByteString -> Int -> Int -> IO ()
+printSpeed dict itemKey entrySize printInterval = do
+  forkIO $
+    printSpeed' 0
   return ()
   where
-    printSpeed num = do
+    printSpeed' num = do
       startTime <- liftIO $ getTime Monotonic
-      threadDelay 3000000
-      curNum <- increaseBy dict appendedEntryNumKey 0
+      threadDelay $ printInterval * 1000000
+      curNum <- increaseBy dict itemKey 0
       endTime <- liftIO $ getTime Monotonic
       let duration = fromInteger (toNanoSecs (diffTimeSpec startTime endTime)) / 1e9
       print $ fromInteger ((curNum - num) * toInteger entrySize) / 1024 / 1024 / duration
-      printSpeed curNum
+      printSpeed' curNum
 
 printAppendAndReadSpeed :: H.HashMap B.ByteString (IORef Integer) -> Int -> IO ()
 printAppendAndReadSpeed dict entrySize = do
-  forkIO $ do
-    printSpeed 0 0
+  forkIO $
+    printSpeed' 0 0
   return ()
   where
-    printSpeed prevAppendedNum prevReadNum = do
+    printSpeed' prevAppendedNum prevReadNum = do
       startTime <- liftIO $ getTime Monotonic
       threadDelay 3000000
       curAppendedNum <- increaseBy dict appendedEntryNumKey 0
@@ -298,4 +303,4 @@ printAppendAndReadSpeed dict entrySize = do
           ++ "read: "
           ++ show (fromInteger ((curReadNum - prevReadNum) * toInteger entrySize) / 1024 / 1024 / duration)
           ++ " MB/s"
-      printSpeed curAppendedNum curReadNum
+      printSpeed' curAppendedNum curReadNum

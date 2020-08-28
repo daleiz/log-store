@@ -146,6 +146,7 @@ withDbReadOnly dbPath =
     )
     R.close
 
+
 getReadOnlyDataDbNames :: MonadIO m => FilePath -> RWL.RWLock -> m [FilePath]
 getReadOnlyDataDbNames dbPath rwLock =
   liftIO $

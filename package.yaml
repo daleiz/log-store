@@ -43,6 +43,8 @@ dependencies:
 - concurrent-extra
 - lifted-base 
 - monad-control 
+- lrucache
+- stm
 
 library:
   source-dirs: src
