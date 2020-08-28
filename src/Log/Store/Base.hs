@@ -46,6 +46,8 @@ import qualified Data.HashMap.Strict as H
 import Data.Hashable (Hashable)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
+import Data.Sequence (Seq (..), (><))
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import Data.Word (Word32, Word64)
@@ -401,10 +403,8 @@ withDbHandleForRead
 
 getMaxEntryId :: MonadIO m => LogID -> ReaderT Context m (Maybe EntryID)
 getMaxEntryId logId = do
-  liftIO $ putStrLn "enter getMaxEntryId"
   Context {..} <- ask
   readOnlyDataDbNames <- getReadOnlyDataDbNames dbPath rwLockForCurDb
-  liftIO $ putStrLn $ "readOnlyDataDbNames: " ++ show readOnlyDataDbNames
   foldM
     (f dbHandlesForReadCache dbHandlesForReadEvcited dbHandlesForReadRcMap dbPath)
     Nothing
@@ -425,15 +425,12 @@ getMaxEntryId logId = do
 
     findMaxEntryIdInDb :: MonadIO m => R.Iterator -> m (Maybe EntryID)
     findMaxEntryIdInDb iterator = do
-      liftIO $ putStrLn "enter findMaxEntryIdInDb"
       R.seekForPrev iterator (encodeEntryKey $ EntryKey logId maxEntryId)
       isValid <- R.valid iterator
       if isValid
         then do
           entryKey <- R.key iterator
-          liftIO $ putStrLn $ "iter to Entrykey" ++ show entryKey
           let (EntryKey entryLogId entryId) = decodeEntryKey entryKey
-          liftIO $ putStrLn $ "entryLogId: " ++ show entryLogId ++ ", entryId: " ++ show entryId
           if entryLogId == logId
             then return $ Just entryId
             else return Nothing
@@ -551,14 +548,14 @@ readEntries ::
   LogHandle ->
   Maybe EntryID ->
   Maybe EntryID ->
-  ReaderT Context m [(EntryID, Entry)]
+  ReaderT Context m (Seq (EntryID, Entry))
 readEntries LogHandle {..} firstKey lastKey = do
   Context {..} <- ask
   readOnlyDataDbNames <- getReadOnlyDataDbNames dbPath rwLockForCurDb
   prevRes <-
     foldM
       (f dbHandlesForReadCache dbHandlesForReadEvcited dbHandlesForReadRcMap logID dbPath)
-      []
+      Seq.empty
       readOnlyDataDbNames
   if goOn prevRes
     then
@@ -568,7 +565,7 @@ readEntries LogHandle {..} firstKey lastKey = do
           ( do
               curDb <- readIORef curDataDbHandleRef
               res <- R.withIterator curDb def $ readEntriesInDb logID
-              return $ prevRes ++ res
+              return $ prevRes >< res
           )
     else return prevRes
   where
@@ -584,17 +581,22 @@ readEntries LogHandle {..} firstKey lastKey = do
               dbPath
               dataDbName
               (\dbForRead -> R.withIterator dbForRead def $ readEntriesInDb logId)
-          return $ prevRes ++ res
+          return $ prevRes >< res
         else return prevRes
 
-    goOn prevRes = null prevRes || fst (last prevRes) < limitEntryId
+    goOn prevRes = Seq.null prevRes || fst (lastElemInSeq prevRes) < limitEntryId
 
-    readEntriesInDb :: MonadIO m => LogID -> R.Iterator -> m [(EntryID, Entry)]
+    lastElemInSeq seq =
+      case seq of
+        Seq.Empty -> error "empty sequence"
+        _ :|> x -> x
+
+    readEntriesInDb :: MonadIO m => LogID -> R.Iterator -> m (Seq (EntryID, Entry))
     readEntriesInDb logId iterator = do
       R.seek iterator (encodeEntryKey $ EntryKey logId startEntryId)
-      loop logId iterator []
+      loop logId iterator Seq.empty
 
-    loop :: MonadIO m => LogID -> R.Iterator -> [(EntryID, Entry)] -> m [(EntryID, Entry)]
+    loop :: MonadIO m => LogID -> R.Iterator -> Seq (EntryID, Entry) -> m (Seq (EntryID, Entry))
     loop logId iterator acc = do
       isValid <- R.valid iterator
       if isValid
@@ -605,7 +607,7 @@ readEntries LogHandle {..} firstKey lastKey = do
             then do
               entry <- R.value iterator
               R.next iterator
-              loop logId iterator (acc ++ [(entryId, entry)])
+              loop logId iterator (acc >< Seq.singleton (entryId, entry))
             else return acc
         else do
           errStr <- R.getError iterator

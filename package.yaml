@@ -45,6 +45,7 @@ dependencies:
 - monad-control 
 - lrucache
 - stm
+- containers
 
 library:
   source-dirs: src

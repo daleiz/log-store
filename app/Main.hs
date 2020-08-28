@@ -14,6 +14,8 @@ import Data.Atomics (atomicModifyIORefCAS)
 import qualified Data.ByteString as B
 import qualified Data.HashMap.Strict as H
 import Data.IORef (IORef, newIORef)
+import Data.Sequence (Seq (..))
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import Data.Word (Word64)
@@ -171,11 +173,11 @@ readTask expectedEntry dict batchSize logName = do
           )
           res
       case res of
-        [] -> do
+        Seq.Empty -> do
           liftIO $ threadDelay 1000
           readBatch lh start end
-        _ -> do
-          let prevEntryId = fst $ last res
+        _ :|> x -> do
+          let prevEntryId = fst x
           let readNum = prevEntryId - start + 1
           increaseBy dict readEntryNumKey $ toInteger readNum
           let nextStart = prevEntryId + 1

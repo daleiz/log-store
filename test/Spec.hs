@@ -11,6 +11,7 @@ import Control.Monad.Trans.Resource (MonadUnliftIO, allocate, runResourceT)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.UTF8 as U
+import qualified Data.Foldable as F
 import Data.Function ((&))
 import Data.List (sort)
 import qualified Data.Vector as V
@@ -34,7 +35,6 @@ import Log.Store.Base
     withLogStore,
     writeMode,
   )
-import qualified Streamly.Prelude as S
 import System.IO.Temp (createTempDirectory)
 import Test.Hspec
   ( describe,
@@ -128,7 +128,7 @@ main = hspec $
                   "log"
                   defaultOpenOptions {writeMode = True, createIfMissing = True}
               entryId <- appendEntry logHandle "entry"
-              readEntries logHandle Nothing Nothing
+              F.toList <$> readEntries logHandle Nothing Nothing
           )
           `shouldReturn` [(1, "entry")]
       it "put some entries to a log and read them" $
@@ -141,7 +141,7 @@ main = hspec $
               entryId1 <- appendEntry logHandle "entry1"
               entryId2 <- appendEntry logHandle "entry2"
               entryId3 <- appendEntry logHandle "entry3"
-              readEntries logHandle Nothing Nothing
+              F.toList <$> readEntries logHandle Nothing Nothing
           )
           `shouldReturn` [(1, "entry1"), (2, "entry2"), (3, "entry3")]
       it "put some entries to multiple logs and read them (1)" $
@@ -171,7 +171,7 @@ main = hspec $
               r1 <- readEntries lh1 Nothing Nothing
               r2 <- readEntries lh2 Nothing Nothing
               r3 <- readEntries lh3 Nothing Nothing
-              return [r1, r2, r3]
+              return $ fmap F.toList [r1, r2, r3]
           )
           `shouldReturn` [ [(1, "log1-entry1"), (2, "log1-entry2"), (3, "log1-entry3")],
                            [(1, "log2-entry1"), (2, "log2-entry2"), (3, "log2-entry3")],
@@ -191,7 +191,7 @@ main = hspec $
               appendEntry lh2 "log2-entry1"
               appendEntry lh2 "log2-entry2"
               appendEntry lh2 "log2-entry3"
-              readEntries lh1 Nothing Nothing
+              F.toList <$> readEntries lh1 Nothing Nothing
           )
           `shouldReturn` []
       it "append entries to a log and read them " $
@@ -202,7 +202,7 @@ main = hspec $
                   "log"
                   defaultOpenOptions {writeMode = True, createIfMissing = True}
               appendEntries logHandle (V.replicate 3 (U.fromString "entry"))
-              readEntries logHandle Nothing Nothing
+              F.toList <$> readEntries logHandle Nothing Nothing
           )
           `shouldReturn` [(1, "entry"), (2, "entry"), (3, "entry")]
       it "append entry repeatly to a log and read them" $
@@ -213,7 +213,7 @@ main = hspec $
                   "log"
                   defaultOpenOptions {writeMode = True, createIfMissing = True}
               appendEntryRepeat 300 logHandle ""
-              res <- readEntries logHandle Nothing Nothing
+              res <- F.toList <$> readEntries logHandle Nothing Nothing
               return $ map fst res
           )
           `shouldReturn` [1 .. 300]
@@ -234,7 +234,7 @@ main = hspec $
                 open
                   "log"
                   defaultOpenOptions {writeMode = True, createIfMissing = True}
-              res <- readEntries lh3 Nothing Nothing
+              res <- F.toList <$> readEntries lh3 Nothing Nothing
               return $ map fst res
           )
           `shouldReturn` [1 .. 600]
@@ -297,7 +297,7 @@ main = hspec $
                           "log1"
                           defaultOpenOptions {writeMode = True, createIfMissing = True}
                       appendEntryRepeat 3 logHandle "l1"
-                      readEntries logHandle Nothing Nothing
+                      F.toList <$> readEntries logHandle Nothing Nothing
                   )
               c2 <-
                 async
@@ -307,7 +307,7 @@ main = hspec $
                           "log2"
                           defaultOpenOptions {writeMode = True, createIfMissing = True}
                       appendEntryRepeat 3 logHandle "l2"
-                      readEntries logHandle Nothing Nothing
+                      F.toList <$> readEntries logHandle Nothing Nothing
                   )
               c3 <-
                 async
@@ -317,7 +317,7 @@ main = hspec $
                           "log3"
                           defaultOpenOptions {writeMode = True, createIfMissing = True}
                       appendEntryRepeat 3 logHandle "l3"
-                      readEntries logHandle Nothing Nothing
+                      F.toList <$> readEntries logHandle Nothing Nothing
                   )
               r1 <- wait c1
               r2 <- wait c2
@@ -364,7 +364,7 @@ main = hspec $
               wait c1
               wait c2
               lh <- wait c3
-              res <- readEntries lh Nothing Nothing
+              res <- F.toList <$> readEntries lh Nothing Nothing
               return $ map fst res
           )
           `shouldReturn` [1 .. 900]
