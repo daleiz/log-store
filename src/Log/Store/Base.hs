@@ -46,7 +46,7 @@ import qualified Data.HashMap.Strict as H
 import Data.Hashable (Hashable)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
-import Data.Sequence (Seq (..), (><))
+import Data.Sequence (Seq (..), (><), (|>))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -607,7 +607,7 @@ readEntries LogHandle {..} firstKey lastKey = do
             then do
               entry <- R.value iterator
               R.next iterator
-              loop logId iterator (acc >< Seq.singleton (entryId, entry))
+              loop logId iterator (acc |> (entryId, entry))
             else return acc
         else do
           errStr <- R.getError iterator
