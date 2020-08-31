@@ -31,7 +31,6 @@ dependencies:
 - transformers
 - mtl
 - rocksdb-haskell-bindings
-- streamly
 - vector
 - utf8-string
 - text
