@@ -365,7 +365,9 @@ withDbHandleForRead
               return handle
       )
       ( \dbHandle -> do
+          putStrLn "ready to unRef ..."
           shouldClose <- unRef
+          putStrLn $ "shouldClose: " ++ show shouldClose
           when shouldClose $ do
             putStrLn $ "close db: " ++ dbName
             R.close dbHandle
