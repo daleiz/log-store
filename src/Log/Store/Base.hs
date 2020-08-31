@@ -283,8 +283,9 @@ open name opts@OpenOptions {..} = do
         Just bId ->
           do
             let logId = decodeLogId bId
-            res <- getMaxEntryId logId
-            maxEntryIdRef <- liftIO $ newIORef $ fromMaybe minEntryId res
+            -- res <- getMaxEntryId logId
+            -- maxEntryIdRef <- liftIO $ newIORef $ fromMaybe minEntryId res
+            maxEntryIdRef <- liftIO $ newIORef minEntryId
             return $
               LogHandle
                 { logName = name,
@@ -360,7 +361,7 @@ withDbHandleForRead
               putStrLn $ "cache miss, open " ++ dbName
               return dbHandle
             Just handle -> do
-              putStrLn $ "cache hit for db " ++ dbName
+              -- putStrLn $ "cache hit for db " ++ dbName
               return handle
       )
       ( \dbHandle -> do
