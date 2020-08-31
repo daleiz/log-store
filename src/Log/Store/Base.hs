@@ -357,13 +357,16 @@ withDbHandleForRead
                   (dbPath </> dbName)
                   False
               insertDbHandleToCache dbHandle
+              putStrLn $ "cache miss, open " ++ dbName
               return dbHandle
-            Just handle ->
+            Just handle -> do
+              putStrLn $ "cache hit for db " ++ dbName
               return handle
       )
       ( \dbHandle -> do
           shouldClose <- unRef
-          when shouldClose $
+          when shouldClose $ do
+            putStrLn $ "close db: " ++ dbName
             R.close dbHandle
       )
     where
