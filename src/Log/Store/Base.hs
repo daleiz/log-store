@@ -342,9 +342,10 @@ withDbHandleForRead
                       let rc = H.lookupDefault 0 dbName rcMap
                       let newRcMap = H.insert dbName (rc + 1) rcMap
                       writeTVar dbHandleRcMap newRcMap
-                      if rc == 0
-                        then return Nothing
-                        else retry
+                      return Nothing
+                      -- if rc == 0
+                      --   then return Nothing
+                      --   else retry
                     Just v -> do
                       writeTVar dbHandleCache newCache
                       return $ Just v
