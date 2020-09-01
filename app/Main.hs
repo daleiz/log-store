@@ -102,7 +102,7 @@ main = do
     Read {..} -> do
       numRef <- newIORef (0 :: Integer)
       let dict = H.singleton readEntryNumKey numRef
-      printSpeed dict readEntryNumKey entrySize 3
+      -- printSpeed dict readEntryNumKey entrySize 3
       withLogStore
         defaultConfig
           { rootDbPath = dbPath,
@@ -163,7 +163,10 @@ readTask expectedEntry dict batchSize logName = do
   where
     readBatch :: MonadIO m => LogHandle -> EntryID -> EntryID -> ReaderT Context m ()
     readBatch lh start end = do
+      startTime <- liftIO $ getTime Monotonic
       res <- readEntries lh (Just start) (Just end)
+      endTime <- liftIO $ getTime Monotonic
+      liftIO $ putStrLn $ "readEntries elapse: " ++ show (endTime - startTime)
       liftIO $
         mapM_
           ( \content ->
