@@ -334,18 +334,22 @@ withDbHandleForRead
           r <-
             atomically
               ( do
+                  rcMap <- readTVar dbHandleRcMap
+                  let rc = H.lookupDefault 0 dbName rcMap
+                  let newRcMap = H.insert dbName (rc + 1) rcMap
+                  writeTVar dbHandleRcMap newRcMap
+
                   cache <- readTVar dbHandleCache
                   let (newCache, res) = L.lookup dbName cache
                   case res of
-                    Nothing -> do
-                      rcMap <- readTVar dbHandleRcMap
-                      let rc = H.lookupDefault 0 dbName rcMap
-                      let newRcMap = H.insert dbName (rc + 1) rcMap
-                      writeTVar dbHandleRcMap newRcMap
-                      return Nothing
-                      -- if rc == 0
-                      --   then return Nothing
-                      --   else retry
+                    Nothing -> 
+                      if rc == 0
+                        then return Nothing
+                        else do 
+                          gcMap <- readTVar dbHandlesEvicted
+                          case H.lookup dbName gcMap of
+                            Nothing -> error "when rc > 0, the dbHandle must exists in lru or gcMap" 
+                            Just v -> return $ Just v
                     Just v -> do
                       writeTVar dbHandleCache newCache
                       return $ Just v
@@ -369,10 +373,11 @@ withDbHandleForRead
               return handle
       )
       ( \dbHandle -> do
-          shouldClose <- unRef
-          when shouldClose $ do
-            putStrLn $ "close db: " ++ dbName
-            R.close dbHandle
+          dbHandlesForFree <- unRef
+          mapM_ R.close dbHandlesForFree
+          let len = length dbHandlesForFree
+          when (len > 0) $ 
+            putStrLn $ show len ++ " dbHandles for free"  
       )
     where
       insertDbHandleToCache :: R.DB -> IO (Maybe String)
@@ -390,25 +395,31 @@ withDbHandleForRead
                   return $ Just k
           )
 
-      unRef :: IO Bool
+      unRef :: IO [R.DB] 
       unRef =
         atomically $
           do
             rcMap <- readTVar dbHandleRcMap
             let rc = H.lookup dbName rcMap
             case rc of
-              Just count -> do
-                writeTVar dbHandleRcMap $ H.adjust (+ (-1)) dbName rcMap
-                if count == 0
-                  then do
-                    s <- readTVar dbHandlesEvicted
-                    case H.lookup dbName s of
-                      Nothing -> return False
-                      Just _ -> do
-                        writeTVar dbHandlesEvicted $ H.delete dbName s
-                        return True
-                  else return False
+              Just _ -> do
+                let newRcMap = H.adjust (+ (-1)) dbName rcMap
+                writeTVar dbHandleRcMap newRcMap 
+
+
+                gcMap <- readTVar dbHandlesEvicted
+                let f k _ = H.lookupDefault 0 k newRcMap > 0
+                let validGcMap = H.filterWithKey f gcMap 
+                let inValidGcMap = H.difference gcMap validGcMap
+                writeTVar dbHandlesEvicted validGcMap
+
+                let validRcMap = H.filterWithKey f newRcMap 
+                writeTVar dbHandleRcMap validRcMap
+
+                return $ H.elems inValidGcMap
               Nothing -> error "this should never reach"
+
+
 
 getMaxEntryId :: MonadIO m => LogID -> ReaderT Context m (Maybe EntryID)
 getMaxEntryId logId = do
