@@ -283,9 +283,8 @@ open name opts@OpenOptions {..} = do
         Just bId ->
           do
             let logId = decodeLogId bId
-            -- res <- getMaxEntryId logId
-            -- maxEntryIdRef <- liftIO $ newIORef $ fromMaybe minEntryId res
-            maxEntryIdRef <- liftIO $ newIORef minEntryId
+            res <- getMaxEntryId logId
+            maxEntryIdRef <- liftIO $ newIORef $ fromMaybe minEntryId res
             return $
               LogHandle
                 { logName = name,
