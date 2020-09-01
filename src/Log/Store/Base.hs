@@ -357,23 +357,24 @@ withDbHandleForRead
                   def
                   (dbPath </> dbName)
                   False
-              insertDbHandleToCache dbHandle
+              r <- insertDbHandleToCache dbHandle
               putStrLn $ "cache miss, open " ++ dbName
+              case r of
+                Nothing -> putStrLn "no item evict"
+                Just k ->  putStrLn $ k ++ " has been evicted"
               return dbHandle
             Just handle -> do
               -- putStrLn $ "cache hit for db " ++ dbName
               return handle
       )
       ( \dbHandle -> do
-          putStrLn "ready to unRef ..."
           shouldClose <- unRef
-          putStrLn $ "shouldClose: " ++ show shouldClose
           when shouldClose $ do
             putStrLn $ "close db: " ++ dbName
             R.close dbHandle
       )
     where
-      insertDbHandleToCache :: R.DB -> IO ()
+      insertDbHandleToCache :: R.DB -> IO (Maybe String)
       insertDbHandleToCache dbHandle =
         atomically
           ( do
@@ -381,10 +382,11 @@ withDbHandleForRead
               let (newCache, evictedKV) = L.insertInforming dbName dbHandle cache
               writeTVar dbHandleCache newCache
               case evictedKV of
-                Nothing -> return ()
+                Nothing -> return Nothing 
                 Just (k, v) -> do
                   s <- readTVar dbHandlesEvicted
                   writeTVar dbHandlesEvicted $ H.insert k v s
+                  return $ Just k
           )
 
       unRef :: IO Bool
