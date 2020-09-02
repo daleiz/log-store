@@ -100,7 +100,9 @@ main = do
           { rootDbPath = dbPath,
             dataCfWriteBufferSize = 200 * 1024 * 1024,
             enableDBStatistics = True,
-            dbStatsDumpPeriodSec = 10
+            dbStatsDumpPeriodSec = 10,
+            partitionInterval = 10,
+            partitionFilesNumLimit = 8
           }
         (mapConcurrently_ (appendTask dict totalSize entrySize batchSize . T.append logNamePrefix . T.pack . show) [1 .. logNum])
     Read {..} -> do
