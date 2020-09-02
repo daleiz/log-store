@@ -331,6 +331,7 @@ withDbHandleForRead
   dbName =
     bracket
       ( do
+          putStrLn $ "enter open db: " ++ dbName
           r <-
             atomically
               ( do
