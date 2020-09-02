@@ -283,9 +283,10 @@ open name opts@OpenOptions {..} = do
         Just bId ->
           do
             let logId = decodeLogId bId
-            res <- getMaxEntryId logId
-            liftIO $ putStrLn $ "res is " ++ show res
-            maxEntryIdRef <- liftIO $ newIORef $ fromMaybe minEntryId res
+            -- res <- getMaxEntryId logId
+            -- liftIO $ putStrLn $ "res is " ++ show res
+            -- maxEntryIdRef <- liftIO $ newIORef $ fromMaybe minEntryId res
+            maxEntryIdRef <- liftIO $ newIORef minEntryId
             return $
               LogHandle
                 { logName = name,
@@ -331,7 +332,6 @@ withDbHandleForRead
   dbName =
     bracket
       ( do
-          putStrLn $ "enter open db: " ++ dbName
           r <-
             atomically
               ( do
