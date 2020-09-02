@@ -284,6 +284,7 @@ open name opts@OpenOptions {..} = do
           do
             let logId = decodeLogId bId
             res <- getMaxEntryId logId
+            liftIO $ putStrLn $ "res is " ++ show res
             maxEntryIdRef <- liftIO $ newIORef $ fromMaybe minEntryId res
             return $
               LogHandle
