@@ -422,6 +422,7 @@ withDbHandleForRead
 
 getMaxEntryId :: MonadIO m => LogID -> ReaderT Context m (Maybe EntryID)
 getMaxEntryId logId = do
+  liftIO $ putStrLn $ "getMaxEntryId for " ++ show logId
   Context {..} <- ask
   readOnlyDataDbNames <- getReadOnlyDataDbNames dbPath rwLockForCurDb
   foldM
@@ -432,7 +433,8 @@ getMaxEntryId logId = do
     f cache gcMap rcMap dbPath prevRes dbName =
       case prevRes of
         Nothing ->
-          liftIO $
+          liftIO $ do
+            putStrLn "prevRes Nothing"
             withDbHandleForRead
               cache
               gcMap
@@ -440,7 +442,9 @@ getMaxEntryId logId = do
               dbPath
               dbName
               (\dbForRead -> R.withIterator dbForRead def findMaxEntryIdInDb)
-        Just res -> return $ Just res
+        Just res -> liftIO $ do
+          putStrLn $ "prevRes " ++ show res
+          return $ Just res
 
     findMaxEntryIdInDb :: MonadIO m => R.Iterator -> m (Maybe EntryID)
     findMaxEntryIdInDb iterator = do
