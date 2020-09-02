@@ -347,7 +347,7 @@ withDbHandleForRead
                         else do 
                           gcMap <- readTVar dbHandlesEvicted
                           case H.lookup dbName gcMap of
-                            Nothing -> error "when rc > 0, the dbHandle must exists in lru or gcMap" 
+                            Nothing -> retry
                             Just v -> return $ Just v
                     Just v -> do
                       writeTVar dbHandleCache newCache
