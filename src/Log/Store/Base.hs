@@ -115,7 +115,7 @@ shardingTask
     threadDelay $ partitionInterval * 1000000
     curDb <- RWL.withRead rwLock $ readIORef curDataDbHandleRef
     curDataDbFilesNum <- getFilesNumInDb curDb
-    putStrLn $ "sharding block finish, fileNums: " ++ show curDataDbFilesNum
+    putStrLn $ "sharding block finish, curfileNums: " ++ show curDataDbFilesNum ++ ", partitionFilesNumLimit: " ++ show partitionFilesNumLimit
     when
       (curDataDbFilesNum >= partitionFilesNumLimit)
       $ RWL.withWrite
