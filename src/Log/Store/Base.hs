@@ -32,6 +32,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async, async, cancel)
+import qualified Control.Concurrent.RWLock as RWL
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, retry, writeTVar)
 import Control.Exception (bracket, throwIO)
 import Control.Monad (foldM, forever, when)
@@ -58,7 +59,6 @@ import Log.Store.Internal
 import Log.Store.Utils
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
-import qualified Control.Concurrent.Classy.RWLock as RWL
 
 -- | Config info
 data Config = Config
@@ -86,7 +86,7 @@ defaultConfig =
 data Context = Context
   { dbPath :: FilePath,
     metaDbHandle :: R.DB,
-    rwLockForCurDb :: RWL.RWLock IO,
+    rwLockForCurDb :: RWL.RWLock,
     curDataDbHandleRef :: IORef R.DB,
     logHandleCache :: TVar (H.HashMap LogHandleKey LogHandle),
     maxLogIdRef :: IORef LogID,
@@ -101,7 +101,7 @@ shardingTask ::
   Int ->
   FilePath ->
   Word64 ->
-  RWL.RWLock IO ->
+  RWL.RWLock ->
   IORef R.DB ->
   IO ()
 shardingTask
@@ -113,12 +113,12 @@ shardingTask
   curDataDbHandleRef = forever $ do
     putStrLn "ready to sharding, will delay..."
     threadDelay $ partitionInterval * 1000000
-    curDb <- RWL.withRead rwLock $ readIORef curDataDbHandleRef
+    curDb <- RWL.withReadLock rwLock $ readIORef curDataDbHandleRef
     curDataDbFilesNum <- getFilesNumInDb curDb
     putStrLn $ "sharding block finish, curfileNums: " ++ show curDataDbFilesNum ++ ", partitionFilesNumLimit: " ++ show partitionFilesNumLimit
     when
       (curDataDbFilesNum >= partitionFilesNumLimit)
-      $ RWL.withWrite
+      $ RWL.withWriteLock
         rwLock
         ( do
             newDbName <- generateDataDbName
@@ -151,7 +151,7 @@ initialize cfg@Config {..} =
     newDataDbHandle <- createDataDb rootDbPath newDataDbName dataCfWriteBufferSize
     newDataDbHandleRef <- newIORef newDataDbHandle
 
-    newRWLock <- RWL.newRWLock
+    newRWLock <- RWL.newRWLockIO
     logHandleCache <- newTVarIO H.empty
     maxLogId <- getMaxLogId metaDb
     logIdRef <- newIORef maxLogId
@@ -482,7 +482,7 @@ appendEntry LogHandle {..} entry = do
   if writeMode openOptions
     then
       liftIO $
-        RWL.withRead
+        RWL.withReadLock
           rwLockForCurDb
           ( do
               entryIds <- generateEntryIds maxEntryIdRef 1
@@ -504,7 +504,7 @@ appendEntries :: MonadIO m => LogHandle -> V.Vector Entry -> ReaderT Context m (
 appendEntries LogHandle {..} entries = do
   Context {..} <- ask
   liftIO $
-    RWL.withRead
+    RWL.withReadLock
       rwLockForCurDb
       ( do
           curDataDb <- readIORef curDataDbHandleRef
@@ -570,7 +570,7 @@ readEntries LogHandle {..} firstKey lastKey = do
   if goOn prevRes
     then
       liftIO $
-        RWL.withRead
+        RWL.withReadLock
           rwLockForCurDb
           ( do
               curDb <- readIORef curDataDbHandleRef
@@ -649,7 +649,7 @@ readEntriesByCount LogHandle {..} firstKey num = do
   if goOn prevRes
     then
       liftIO $
-        RWL.withRead
+        RWL.withReadLock
           rwLockForCurDb
           ( do
               curDb <- readIORef curDataDbHandleRef
