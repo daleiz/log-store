@@ -111,9 +111,11 @@ shardingTask
   cfWriteBufferSize
   rwLock
   curDataDbHandleRef = forever $ do
+    putStrLn "ready to sharding, will delay..."
     threadDelay $ partitionInterval * 1000000
     curDb <- RWL.withRead rwLock $ readIORef curDataDbHandleRef
     curDataDbFilesNum <- getFilesNumInDb curDb
+    putStrLn $ "sharding block finish, fileNums: " ++ show curDataDbFilesNum
     when
       (curDataDbFilesNum >= partitionFilesNumLimit)
       $ RWL.withWrite
@@ -123,6 +125,7 @@ shardingTask
             newDbHandle <- createDataDb dbPath newDbName cfWriteBufferSize
             R.flush curDb def
             R.close curDb
+            putStrLn $ "sharding create new db: " ++ newDbName
             writeIORef curDataDbHandleRef newDbHandle
         )
 
