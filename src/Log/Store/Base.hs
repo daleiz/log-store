@@ -32,7 +32,6 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async, async, cancel)
-import qualified Control.Concurrent.ReadWriteLock as RWL
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, retry, writeTVar)
 import Control.Exception (bracket, throwIO)
 import Control.Monad (foldM, forever, when)
@@ -59,6 +58,7 @@ import Log.Store.Internal
 import Log.Store.Utils
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
+import qualified Control.Concurrent.Classy.RWLock as RWL
 
 -- | Config info
 data Config = Config
@@ -86,7 +86,7 @@ defaultConfig =
 data Context = Context
   { dbPath :: FilePath,
     metaDbHandle :: R.DB,
-    rwLockForCurDb :: RWL.RWLock,
+    rwLockForCurDb :: RWL.RWLock IO,
     curDataDbHandleRef :: IORef R.DB,
     logHandleCache :: TVar (H.HashMap LogHandleKey LogHandle),
     maxLogIdRef :: IORef LogID,
@@ -101,7 +101,7 @@ shardingTask ::
   Int ->
   FilePath ->
   Word64 ->
-  RWL.RWLock ->
+  RWL.RWLock IO ->
   IORef R.DB ->
   IO ()
 shardingTask
@@ -151,7 +151,7 @@ initialize cfg@Config {..} =
     newDataDbHandle <- createDataDb rootDbPath newDataDbName dataCfWriteBufferSize
     newDataDbHandleRef <- newIORef newDataDbHandle
 
-    newRWLock <- RWL.new
+    newRWLock <- RWL.newRWLock
     logHandleCache <- newTVarIO H.empty
     maxLogId <- getMaxLogId metaDb
     logIdRef <- newIORef maxLogId

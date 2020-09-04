@@ -11,7 +11,7 @@ import ByteString.StrictBuilder (Builder, builderBytes, word64BE)
 -- import Control.Monad.Trans.Control (MonadBaseControl)
 -- import Control.Monad.Trans.Resource (MonadUnliftIO, allocate, runResourceT)
 
-import qualified Control.Concurrent.ReadWriteLock as RWL
+import qualified Control.Concurrent.Classy.RWLock as RWL
 import Control.Concurrent.STM (TVar, atomically, readTVar, writeTVar)
 import Control.Exception (bracket, throw, throwIO)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -184,12 +184,11 @@ withDbReadOnly dbPath =
     )
     R.close
 
-getReadOnlyDataDbNames :: MonadIO m => FilePath -> RWL.RWLock -> m [FilePath]
-getReadOnlyDataDbNames dbPath rwLock =
-  liftIO $
+getReadOnlyDataDbNames :: MonadIO m => FilePath -> RWL.RWLock IO -> m [FilePath]
+getReadOnlyDataDbNames dbPath rwLock = liftIO $
     RWL.withRead
       rwLock
       ( do
-          res <- listDirectory dbPath
+          res <- liftIO $ listDirectory dbPath
           return $ init $ sort $ filter (isPrefixOf dataDbNamePrefix) res
       )
